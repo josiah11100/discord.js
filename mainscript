@@ -1,0 +1,105 @@
+// index.js
+import express from "express";
+import bodyParser from "body-parser";
+import fetch from "node-fetch";
+import { Client, GatewayIntentBits, EmbedBuilder } from "discord.js";
+
+// ─── CONFIG ────────────────────────────────────────────────────────────────────
+const BOT_TOKEN   = process.env.BOT_TOKEN;      // your bot’s token
+const CHANNEL_ID  = process.env.CHANNEL_ID;     // ID of channel to post embeds
+const PORT        = process.env.PORT || 3000;   // webserver port
+
+// ─── HELPERS ───────────────────────────────────────────────────────────────────
+function getColor(amount) {
+  if (amount >= 10_000_000) return 0xFB0505;  // Starfall
+  if (amount >= 1_000_000 ) return 0xEF1085;  // Smite
+  if (amount >=   100_000 ) return 0xFA04F2;  // Nuke
+  if (amount >=    10_000 ) return 0x0066B6;  // Blimp
+  if (amount >=         1 ) return 0x93C54B;  // Normal
+  return 0xCCCCCC;
+}
+
+function getEmoji(amount) {
+  if (amount >= 10_000_000) return "<:starfall:1334821609583935488>";
+  if (amount >= 1_000_000 ) return "<:smite:1334825303528177675>";
+  if (amount >=   100_000 ) return "<:nuke:1334825650673942590>";
+  if (amount >=    10_000 ) return "<:blimp:1334826230888796170>";
+  return "<:robux:1334827254835970068>";
+}
+
+function getType(amount) {
+  if (amount >= 10_000_000) return "Starfall";
+  if (amount >= 1_000_000 ) return "Smite";
+  if (amount >=   100_000 ) return "Nuke";
+  if (amount >=    10_000 ) return "Blimp";
+  return "Donation";
+}
+
+function getMarks(amount) {
+  if (amount >= 10_000_000) return "!?!??!?!";
+  if (amount >= 1_000_000 ) return "!??!?!";
+  if (amount >=   100_000 ) return "!??!";
+  if (amount >=    10_000 ) return "!?";
+  return "!";
+}
+
+async function fetchRobloxUser(userId) {
+  const res = await fetch(`https://users.roblox.com/v1/users/${userId}`);
+  if (!res.ok) return { id: userId, name: "Unknown" };
+  const js = await res.json();
+  return { id: js.id, name: js.name };
+}
+
+// ─── DISCORD BOT ────────────────────────────────────────────────────────────────
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+
+client.once("ready", () => {
+  console.log(`Logged in as ${client.user.tag}`);
+});
+
+// express app
+const app = express();
+app.use(bodyParser.json());
+
+app.post("/donation", async (req, res) => {
+  try {
+    const {
+      donatorId, donatorName,
+      raisedId,  raisedName,
+      robuxAmount, timestamp
+    } = req.body;
+
+    // in case you only sent IDs upstream:
+    let donor = { id: donatorId, name: donatorName };
+    let raiser = { id: raisedId, name: raisedName };
+    if (!donatorName) donor = await fetchRobloxUser(donatorId);
+    if (!raisedName)  raiser = await fetchRobloxUser(raisedId);
+
+    const embed = new EmbedBuilder()
+      .setTitle(`@${donor.name} just dropped a ${getEmoji(robuxAmount)} ${Number(robuxAmount).toLocaleString()} ${getType(robuxAmount)} to @${raiser.name}${getMarks(robuxAmount)}`)
+      .setDescription(`${getEmoji(robuxAmount)} \`@${donor.name}\` donated **<:robux:1334827254835970068> ${Number(robuxAmount).toLocaleString()}** to \`@${raiser.name}\``)
+      .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${donor.id}&width=420&height=420&format=png`)
+      .setColor(getColor(robuxAmount))
+      .setTimestamp(new Date(timestamp))
+      .setFooter({ text: "Donated" });
+
+    const channel = await client.channels.fetch(CHANNEL_ID);
+    if (!channel || !channel.isTextBased()) {
+      console.error("Invalid channel:", CHANNEL_ID);
+      return res.status(500).send("Bad channel");
+    }
+
+    await channel.send({ embeds: [embed] });
+    res.status(200).send("OK");
+  } catch (err) {
+    console.error("Donation→Discord error:", err);
+    res.status(500).send("Error");
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Donation listener running on port ${PORT}`);
+});
+
+// finally log in your bot:
+client.login(BOT_TOKEN);
